@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>EscapePlan Attendance Tracker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1024">
 
 <!-- Bright, techy mobile-first UI -->
 <style>
@@ -12,7 +13,7 @@
     --text:#eaf2ff; --muted:#b3c0d9;
     --accent:#22d3ee; --violet:#7c3aed; --pink:#f43f5e;
     --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444;
-    --radius:16px; --shadow:0 16px 48px rgba(7,9,26,.6);
+    --radius:16px; --shadow:0 16px 48px rgba(7,9,26,.6)
   }
   *{box-sizing:border-box} html,body{height:100%}
   body{
@@ -40,7 +41,7 @@
   label{display:block;font-size:12px;color:var(--muted);margin:6px 2px}
   .grid{display:grid;gap:12px}
   @media(min-width:720px){.grid-3{grid-template-columns:1fr 1fr 1fr}}
-  select,input[type="password"],input[type="file"]{
+  select,input[type="file"]{
     width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--stroke);
     background:linear-gradient(180deg, rgba(5,8,21,.85), rgba(5,8,21,.75));color:var(--text);font-size:16px
   }
@@ -57,14 +58,15 @@
   .muted{color:var(--muted);font-size:12px}
   .footer{text-align:center;color:var(--muted);font-size:12px;padding:14px 0 28px}
 </style>
-<!-- On-device face verify -->
+
+<!-- On-device face verification (Human.js) -->
 <script src="https://cdn.jsdelivr.net/npm/@vladmandic/human/dist/human.js"></script>
 </head>
 <body>
 <header class="appbar">
   <div class="appbar-inner">
     <div class="brand"><div class="logo"></div>EscapePlan Attendance Tracker</div>
-    <div class="pill">GPS + Watermark + Face Verify</div>
+    <div class="pill">GPS • Watermark • Face Verify</div>
   </div>
 </header>
 
@@ -119,7 +121,7 @@
       <div style="margin-top:10px">
         <img id="preview" class="preview" style="display:none" alt="Preview">
       </div>
-      <div class="muted" style="margin-top:6px">The photo is watermarked with name, date/time (IST), GPS & address.</div>
+      <div class="muted" style="margin-top:6px">Photo is watermarked with name, IST time, GPS & address.</div>
     </div>
   </section>
 
@@ -131,19 +133,20 @@
         <button id="resetBtn" class="btn alt">Reset</button>
         <span id="submitStatus" class="badge">Not submitted</span>
       </div>
-      <div class="muted" style="margin-top:8px">We save a server timestamp (IST), plus your GPS, status, address, face score & photo URL in today's tab.</div>
+      <div class="muted" style="margin-top:8px">We save a server timestamp (IST), your GPS, status, address, face score & photo URL in today’s tab.</div>
     </div>
   </section>
 
-  <div class="footer">Privacy: location & camera used only for attendance capture.</div>
+  <div class="footer">Privacy: location & camera are used only for attendance capture.</div>
 </main>
 
 <script>
-/** ==== CONFIG (your values) ==== */
+/** ==== CONFIG (your real values) ==== */
 const ROSTER_SHEET_ID = '13od8p_pcVQsMGHVqhoI-bOrW3xDeOKNeM4rf0uc8PX4';
 const ROSTER_TAB_NAME = 'Roster';
 const GAS_WEBAPP_URL  = 'https://script.google.com/macros/s/AKfycbzUDKjO8sHe9tLB52OKFvnSyQxJWNARdaGDzWgvxd_P8p6_tp6a2Z-jG5ev8KTKsCTd/exec';
-const ROSTER_URL = `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`;
+/* Use the OpenSheet domain you verified */
+const ROSTER_URL = `https://opensheet.elk.sh/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`;
 
 /** ==== STATE ==== */
 let ROSTER = [];
@@ -151,8 +154,8 @@ let selected = { city:'', mall:'', rep:'', storeId:'', refLat:null, refLon:null,
 let userLat = null, userLon = null, lastAccuracy = null;
 let watchId = null;
 let photoBase64 = '';
-let addressText = '';  // reverse-geocoded
-let clientTsIST = '';  // client-side IST (for watermark)
+let addressText = '';
+let clientTsIST = '';
 let faceScore = null, faceVerified = false;
 
 // Human face-lib
@@ -191,42 +194,61 @@ async function reverseGeocode(lat, lon){
 }
 function cosineSimilarity(a,b){
   let dot=0,na=0,nb=0;
-  for (let i=0;i<a.length && i<b.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-  return dot / (Math.sqrt(na)*Math.sqrt(nb));
+  const n = Math.min(a.length, b.length);
+  for (let i=0;i<n;i++){ const x=a[i], y=b[i]; dot+=x*y; na+=x*x; nb+=y*y; }
+  const denom = Math.sqrt(na)*Math.sqrt(nb);
+  return denom ? (dot/denom) : 0;
 }
 function setFaceBadge(){
   const el = $("faceStatus"); el.style.display = "inline-flex";
   if (faceScore==null){ el.textContent = "Face: not detected"; el.className="badge warn"; return; }
-  el.textContent = faceVerified ? `Face: Verified (${(faceScore*100|0)/100})` : `Face: Not match (${(faceScore*100|0)/100})`;
+  el.textContent = faceVerified ? `Face: Verified (${(Math.round(faceScore*100)/100)})` : `Face: Not match (${(Math.round(faceScore*100)/100)})`;
   el.className = faceVerified ? "badge ok" : "badge bad";
 }
 
-/** ==== LOAD ROSTER ==== */
+/** ==== LOAD ROSTER (normalize headers) ==== */
 async function loadRoster(){
-  const res = await fetch(ROSTER_URL);
-  ROSTER = await res.json();
-  const cities = uniq(ROSTER.map(r=>t(r['City'])));
-  $("city").innerHTML = `<option value="">Select City</option>` + cities.sort().map(c=>`<option value="${c}">${c}</option>`).join('');
+  try{
+    const res = await fetch(ROSTER_URL, { headers: { 'Accept':'application/json' }});
+    const raw = await res.json();
+
+    // Normalize: lower-case keys so code is robust to header spelling/case/space
+    ROSTER = raw.map(row => {
+      const o = {};
+      Object.keys(row).forEach(k => o[String(k).trim().toLowerCase()] = row[k]);
+      return o;
+    });
+
+    const cities = uniq(ROSTER.map(r => t(r.city)));
+    $("city").innerHTML = `<option value="">Select City</option>` +
+      cities.sort().map(c => `<option value="${c}">${c}</option>`).join('');
+  } catch (e) {
+    console.error('Roster load failed:', e);
+    $("city").innerHTML = `<option value="">Failed to load roster</option>`;
+  }
 }
 $("city").addEventListener("change", ()=>{
   selected.city = $("city").value;
-  const malls = uniq(ROSTER.filter(r=>t(r['City'])===t(selected.city)).map(r=>t(r['Mall'])));
-  $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option value="${m}">${m}</option>`).join('');
+  const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
+  $("mall").innerHTML = `<option value="">Select Mall</option>` +
+    malls.sort().map(m => `<option value="${m}">${m}</option>`).join('');
   $("rep").innerHTML = `<option value="">Select Your Name</option>`;
   ["storeIdBadge","refBadge","faceStatus"].forEach(id => $(id).style.display="none");
 });
 $("mall").addEventListener("change", ()=>{
   selected.mall = $("mall").value;
-  const reps = uniq(ROSTER.filter(r=>t(r['City'])===t(selected.city) && t(r['Mall'])===t(selected.mall)).map(r=>t(r['Salesperson'])));
-  $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option value="${r}">${r}</option>`).join('');
+  const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
+  $("rep").innerHTML = `<option value="">Select Your Name</option>` +
+    reps.sort().map(r => `<option value="${r}">${r}</option>`).join('');
   ["storeIdBadge","refBadge","faceStatus"].forEach(id => $(id).style.display="none");
 });
 $("rep").addEventListener("change", ()=>{
   selected.rep = $("rep").value;
-  const row = ROSTER.find(r => t(r['City'])===t(selected.city) && t(r['Mall'])===t(selected.mall) && t(r['Salesperson'])===t(selected.rep)) || {};
-  selected.storeId = t(row['Store ID']);
-  selected.refLat = num(row['Ref Lat']); selected.refLon = num(row['Ref Lon']);
-  selected.refPhotoUrl = t(row['Ref Photo URL']);
+  const row = ROSTER.find(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall) && t(r.salesperson)===t(selected.rep)) || {};
+  selected.storeId     = t(row['store id']);
+  selected.refLat      = num(row['ref lat']);
+  selected.refLon      = num(row['ref lon']);
+  selected.refPhotoUrl = t(row['ref photo url']);
   if (selected.storeId){ $("storeIdBadge").textContent = "Store ID: " + selected.storeId; $("storeIdBadge").style.display="inline-flex"; }
   if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
     $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
@@ -249,7 +271,6 @@ $("locBtn").addEventListener("click", ()=>{
         const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
         $("distance").textContent = `${m} m`; setProximityBadge(m);
       }
-      // reverse geocode (once per session or when coords change a lot)
       addressText = await reverseGeocode(userLat, userLon);
       $("addrLine").textContent = addressText ? `Address: ${addressText}` : '';
     },
@@ -270,9 +291,9 @@ async function runFaceVerify(refUrl, capBase64){
     const capEmb = capDet?.face?.[0]?.embedding;
     if (refEmb && capEmb){
       faceScore = cosineSimilarity(refEmb, capEmb);       // 0..1 (higher is more similar)
-      faceVerified = faceScore >= 0.85;                   // threshold; adjust if needed
+      faceVerified = faceScore >= 0.85;                   // threshold; tune as needed
     }
-  }catch(e){ /* ignore */ }
+  }catch(e){ /* ignore; we display "not detected" */ }
 }
 function loadImg(src){
   return new Promise((resolve,reject)=>{ const im=new Image(); im.crossOrigin='anonymous'; im.onload=()=>resolve(im); im.onerror=reject; im.src=src; });
@@ -284,29 +305,27 @@ $("photo").addEventListener("change", async (e)=>{
   reader.onload = async ()=>{
     const img = new Image();
     img.onload = async ()=>{
-      // Resize & draw
       const MAX = 1280, s = Math.min(1, MAX/img.width, MAX/img.height);
       const w = Math.round(img.width*s), h = Math.round(img.height*s);
       const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
 
-      // Watermark box
-      ctx.fillStyle = 'rgba(0,0,0,0.58)'; ctx.fillRect(0, h-70, w, 70);
+      // Watermark
+      ctx.fillStyle = 'rgba(0,0,0,0.58)'; ctx.fillRect(0, h-72, w, 72);
       ctx.fillStyle = '#fff'; ctx.font = '16px system-ui, Segoe UI, Roboto, Arial';
       const ts = clientTsIST || nowIST();
       const line1 = `${selected.rep} • ${selected.city}/${selected.mall}`;
       const line2 = `${ts} • ${userLat?.toFixed(5)||'-'},${userLon?.toFixed(5)||'-'} (±${lastAccuracy||'-'}m)`;
       const line3 = (addressText||'').slice(0, 80);
-      ctx.fillText(line1, 10, h-46);
-      ctx.fillText(line2, 10, h-26);
-      ctx.fillText(line3, 10, h-8);
+      ctx.fillText(line1, 10, h-48);
+      ctx.fillText(line2, 10, h-28);
+      ctx.fillText(line3, 10, h-10);
 
-      // Export
       photoBase64 = canvas.toDataURL('image/jpeg', 0.85);
       $("preview").src = photoBase64; $("preview").style.display = "block";
 
-      // Face verify (non-blocking visual)
+      // Face verify (non-blocking)
       $("faceStatus").style.display="inline-flex"; $("faceStatus").textContent = "Face: checking…";
       await runFaceVerify(selected.refPhotoUrl, photoBase64);
       setFaceBadge();
@@ -316,7 +335,7 @@ $("photo").addEventListener("change", async (e)=>{
   reader.readAsDataURL(f);
 });
 
-/** ==== SUBMIT ==== */
+/** ==== SUBMIT (no preflight) ==== */
 $("submitBtn").addEventListener("click", async ()=>{
   if (!selected.city || !selected.mall || !selected.rep){ $("submitStatus").textContent = "Select City, Mall & Your Name"; return; }
   if (userLat==null || userLon==null){ $("submitStatus").textContent = "Tap 'Use My Location' first"; return; }
@@ -335,7 +354,7 @@ $("submitBtn").addEventListener("click", async ()=>{
   try{
     const res = await fetch(GAS_WEBAPP_URL, {
       method:'POST',
-      headers:{ 'Content-Type':'text/plain;charset=utf-8' }, // avoid preflight/CORS
+      headers:{ 'Content-Type':'text/plain;charset=utf-8' }, // simple request → no CORS preflight
       body: JSON.stringify(payload)
     });
     const text = await res.text();
@@ -351,7 +370,7 @@ $("submitBtn").addEventListener("click", async ()=>{
   }
 });
 
-// Reset
+/** Reset */
 $("resetBtn").addEventListener("click", ()=>{
   ["city","mall","rep"].forEach(id => $(id).selectedIndex = 0);
   selected = { city:'', mall:'', rep:'', storeId:'', refLat:null, refLon:null, refPhotoUrl:'' };
