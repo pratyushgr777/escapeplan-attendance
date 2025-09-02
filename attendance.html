@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EscapePlan Attendance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0b1220; --panel:#0f172a; --stroke:#1f2937; --text:#e5e7eb; --muted:#94a3b8;
+    --accent:#22d3ee; --accent2:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    --radius:14px; --shadow:0 8px 26px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1000px 600px at 120% -10%, rgba(34,211,238,.12), transparent 60%), var(--bg);color:var(--text);font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial}
+  .wrap{max-width:720px;margin:16px auto;padding:16px}
+  .panel{border:1px solid var(--stroke);background:linear-gradient(180deg, rgba(2,6,23,.9), rgba(15,23,42,.95));border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+  .h{padding:12px 14px;border-bottom:1px solid var(--stroke);font-weight:800;color:var(--accent)}
+  .b{padding:14px}
+  .grid{display:grid;gap:12px}
+  @media(min-width:680px){.grid-2{grid-template-columns:1fr 1fr}}
+  label{font-size:12px;color:var(--muted);display:block;margin:6px 2px}
+  select, input[type="text"]{width:100%;padding:12px;border:1px solid var(--stroke);border-radius:12px;background:#0b1220;color:#e5e7eb;font-size:16px}
+  button{appearance:none;border:1px solid var(--stroke);background:linear-gradient(180deg, #0b1220, #111827);color:#e2e8f0;padding:10px 14px;border-radius:12px;font-size:14px;cursor:pointer}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .badge{font-size:12px;color:#67e8f9;border:1px solid rgba(34,211,238,.25);border-radius:999px;padding:4px 8px}
+  .status{font-size:13px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .preview{width:100%;max-height:280px;object-fit:cover;border-radius:12px;border:1px solid var(--stroke)}
+  .muted{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section class="panel">
+    <div class="h">EscapePlan Attendance</div>
+    <div class="b">
+      <div class="grid grid-2">
+        <div>
+          <label>City</label>
+          <select id="city"><option value="">Select City</option></select>
+        </div>
+        <div>
+          <label>Mall</label>
+          <select id="mall"><option value="">Select Mall</option></select>
+        </div>
+        <div>
+          <label>Your Name</label>
+          <select id="rep"><option value="">Select Your Name</option></select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="badge" id="storeIdBadge" style="display:none"></span>
+        <span class="badge" id="refBadge" style="display:none"></span>
+      </div>
+      <div class="muted" style="margin-top:8px">Pick your city, mall and your name. Then allow location & camera.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="h">Location</div>
+    <div class="b">
+      <div class="row">
+        <button id="locBtn">Use My Location</button>
+        <span id="locStatus" class="status">Waiting…</span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span>Distance to store: </span>
+        <strong id="distance">— m</strong>
+        <span id="proximity" class="badge" style="display:none"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="h">Photo</div>
+    <div class="b">
+      <input id="photo" type="file" accept="image/*" capture="environment">
+      <div style="margin-top:10px">
+        <img id="preview" class="preview" style="display:none">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="h">Submit</div>
+    <div class="b">
+      <div class="row">
+        <button id="submitBtn">Submit Attendance</button>
+        <span id="submitStatus" class="status">Not submitted</span>
+      </div>
+      <div class="muted" style="margin-top:8px">
+        We will save a timestamp (IST), your GPS, distance, status, and photo in today's tab of the master sheet.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+/** ====== CONFIG (fill these) ====== **/
+const ROSTER_SHEET_ID = '13od8p_pcVQsMGHVqhoI-bOrW3xDeOKNeM4rf0uc8PX4';
+const ROSTER_TAB_NAME = 'Roster';
+const GAS_WEBAPP_URL  = 'https://script.google.com/macros/s/AKfycbzUDKjO8sHe9tLB52OKFvnSyQxJWNARdaGDzWgvxd_P8p6_tp6a2Z-jG5ev8KTKsCTd/exec';
+
+// use this (keep the backticks)
+const ROSTER_URL = `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`;
+
+
+/** ====== STATE ====== **/
+let ROSTER = [];
+let selected = { city:'', mall:'', rep:'', storeId:'', refLat:null, refLon:null };
+let watchId = null;
+let userLat = null, userLon = null;
+let photoBase64 = '';
+
+/** ====== HELPERS ====== **/
+const $ = id => document.getElementById(id);
+const t = v => v==null ? '' : String(v).trim();
+const num = v => { const x = parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(x)?x:NaN; };
+function uniq(arr){ return Array.from(new Set(arr.filter(x=>t(x)!==''))); }
+function haversineMeters(lat1, lon1, lat2, lon2){
+  function toRad(d){return d*Math.PI/180}
+  const R=6371000;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+}
+function setProximityBadge(m){
+  const el = $("proximity");
+  el.style.display = "inline-block";
+  if (m < 100) { el.textContent = "OK (<100m)"; el.className = "badge ok"; }
+  else if (m <= 250) { el.textContent = "Check (100–250m)"; el.className = "badge warn"; }
+  else { el.textContent = "Not captured (>250m)"; el.className = "badge bad"; }
+}
+
+/** ====== LOAD ROSTER ====== **/
+async function loadRoster(){
+  const res = await fetch(ROSTER_URL);
+  ROSTER = await res.json();
+  // Expected headers: City, Mall, Salesperson, Ref Lat, Ref Lon, (optional) Store ID
+  buildCity();
+}
+
+function buildCity(){
+  const cities = uniq(ROSTER.map(r=>t(r['City'])));
+  $("city").innerHTML = `<option value="">Select City</option>` + cities.sort().map(c=>`<option value="${c}">${c}</option>`).join('');
+  $("mall").innerHTML = `<option value="">Select Mall</option>`;
+  $("rep").innerHTML = `<option value="">Select Your Name</option>`;
+  $("storeIdBadge").style.display = "none";
+  $("refBadge").style.display = "none";
+}
+
+$("city").addEventListener("change", ()=>{
+  selected.city = $("city").value;
+  const malls = uniq(ROSTER.filter(r=>t(r['City'])===t(selected.city)).map(r=>t(r['Mall'])));
+  $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option value="${m}">${m}</option>`).join('');
+  $("rep").innerHTML = `<option value="">Select Your Name</option>`;
+  $("storeIdBadge").style.display = "none";
+  $("refBadge").style.display = "none";
+});
+
+$("mall").addEventListener("change", ()=>{
+  selected.mall = $("mall").value;
+  const reps = uniq(ROSTER.filter(r=>t(r['City'])===t(selected.city) && t(r['Mall'])===t(selected.mall)).map(r=>t(r['Salesperson'])));
+  $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option value="${r}">${r}</option>`).join('');
+  $("storeIdBadge").style.display = "none";
+  $("refBadge").style.display = "none";
+});
+
+$("rep").addEventListener("change", ()=>{
+  selected.rep = $("rep").value;
+  // pick first matching row for refs
+  const row = ROSTER.find(r => t(r['City'])===t(selected.city) && t(r['Mall'])===t(selected.mall) && t(r['Salesperson'])===t(selected.rep)) || {};
+  selected.storeId = t(row['Store ID']);
+  selected.refLat = num(row['Ref Lat']);
+  selected.refLon = num(row['Ref Lon']);
+  if (selected.storeId) {
+    $("storeIdBadge").textContent = 'Store ID: ' + selected.storeId;
+    $("storeIdBadge").style.display = "inline-block";
+  }
+  if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)) {
+    $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
+    $("refBadge").style.display = "inline-block";
+  }
+});
+
+/** ====== GEO LOCATION ====== **/
+$("locBtn").addEventListener("click", ()=>{
+  if (!navigator.geolocation){
+    $("locStatus").textContent = "Geolocation not supported";
+    return;
+  }
+  $("locStatus").textContent = "Requesting location permission…";
+  if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  watchId = navigator.geolocation.watchPosition(
+    pos=>{
+      userLat = pos.coords.latitude;
+      userLon = pos.coords.longitude;
+      $("locStatus").textContent = `Live: ${userLat.toFixed(5)}, ${userLon.toFixed(5)} (±${Math.round(pos.coords.accuracy)}m)`;
+      if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)) {
+        const m = haversineMeters(userLat, userLon, selected.refLat, selected.refLon);
+        $("distance").textContent = `${m} m`;
+        setProximityBadge(m);
+      } else {
+        $("distance").textContent = '— m';
+      }
+    },
+    err=>{
+      $("locStatus").textContent = "Location denied or unavailable";
+    },
+    { enableHighAccuracy:true, maximumAge:5000, timeout:15000 }
+  );
+});
+
+/** ====== PHOTO CAPTURE + PREVIEW (compress) ====== **/
+$("photo").addEventListener("change", async (e)=>{
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = ()=>{
+    const MAX_W = 1280, MAX_H = 1280;
+    let {width:w, height:h} = img;
+    const scale = Math.min(1, MAX_W/w, MAX_H/h);
+    const cw = Math.round(w*scale), ch = Math.round(h*scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, cw, ch);
+    photoBase64 = canvas.toDataURL('image/jpeg', 0.8);
+    $("preview").src = photoBase64;
+    $("preview").style.display = 'block';
+  };
+  const reader = new FileReader();
+  reader.onload = ()=>{ img.src = reader.result; };
+  reader.readAsDataURL(file);
+});
+
+/** ====== SUBMIT ====== **/
+$("submitBtn").addEventListener("click", async ()=>{
+  if (!selected.city || !selected.mall || !selected.rep) {
+    $("submitStatus").textContent = "Select City, Mall and Your Name";
+    return;
+  }
+  if (userLat == null || userLon == null) {
+    $("submitStatus").textContent = "Please enable location first";
+    return;
+  }
+  if (!photoBase64) {
+    $("submitStatus").textContent = "Please capture a photo";
+    return;
+  }
+
+  $("submitStatus").textContent = "Submitting…";
+
+  const payload = {
+    city: selected.city,
+    mall: selected.mall,
+    salesperson: selected.rep,
+    storeId: selected.storeId || '',
+    userLat, userLon,
+    photoBase64
+  };
+
+  try{
+    const res = await fetch(GAS_WEBAPP_URL, {
+      method:'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.ok){
+      $("submitStatus").textContent = `Done ✓  ${data.status} • Distance: ${data.distanceMeters} m • Receipt: ${data.receiptId}`;
+      setProximityBadge(Number(data.distanceMeters));
+    } else {
+      $("submitStatus").textContent = "Error: " + (data.error || "Unknown");
+    }
+  }catch(err){
+    $("submitStatus").textContent = "Network error";
+  }
+});
+
+/** boot **/
+loadRoster();
+</script>
+</body>
+</html>
