@@ -329,8 +329,13 @@ $("submitBtn").addEventListener("click", async ()=>{
 
   try{
     const res = await fetch(GAS_WEBAPP_URL, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8}, body: JSON.stringify(payload)
     });
+    const text = await res.text();
+let data;
+try { data = JSON.parse(text); }
+catch { throw new Error('Server replied, but not JSON: ' + text.slice(0,120)); }
+
     const data = await res.json();
     if (data.ok){
       $("submitStatus").textContent = `Done ✓  ${data.status} • ${data.distanceMeters} m • ${data.receiptId}`;
