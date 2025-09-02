@@ -66,7 +66,7 @@
 <header class="appbar">
   <div class="appbar-inner">
     <div class="brand"><div class="logo"></div>EscapePlan Attendance Tracker</div>
-    <div class="pill">GPS • Watermark • Face Verify</div>
+    <div class="pill" id="dataStatus">Loading roster…</div>
   </div>
 </header>
 
@@ -141,12 +141,15 @@
 </main>
 
 <script>
-/** ==== CONFIG (your real values) ==== */
+/** ==== CONFIG ==== */
 const ROSTER_SHEET_ID = '13od8p_pcVQsMGHVqhoI-bOrW3xDeOKNeM4rf0uc8PX4';
 const ROSTER_TAB_NAME = 'Roster';
 const GAS_WEBAPP_URL  = 'https://script.google.com/macros/s/AKfycbzUDKjO8sHe9tLB52OKFvnSyQxJWNARdaGDzWgvxd_P8p6_tp6a2Z-jG5ev8KTKsCTd/exec';
-/* Use the OpenSheet domain you verified */
-const ROSTER_URL = `https://opensheet.elk.sh/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`;
+/* Fallback: elk.sh → vercel.app */
+const ROSTER_URLS = [
+  `https://opensheet.elk.sh/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`,
+  `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`
+];
 
 /** ==== STATE ==== */
 let ROSTER = [];
@@ -206,27 +209,37 @@ function setFaceBadge(){
   el.className = faceVerified ? "badge ok" : "badge bad";
 }
 
-/** ==== LOAD ROSTER (normalize headers) ==== */
+/** ==== LOAD ROSTER with fallback & status ==== */
 async function loadRoster(){
-  try{
-    const res = await fetch(ROSTER_URL, { headers: { 'Accept':'application/json' }});
-    const raw = await res.json();
+  const status = $("dataStatus");
+  status.textContent = "Loading roster…";
+  for (const url of ROSTER_URLS){
+    try{
+      const res = await fetch(url, { headers: { 'Accept':'application/json' }, cache:'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = await res.json();
 
-    // Normalize: lower-case keys so code is robust to header spelling/case/space
-    ROSTER = raw.map(row => {
-      const o = {};
-      Object.keys(row).forEach(k => o[String(k).trim().toLowerCase()] = row[k]);
-      return o;
-    });
+      // Normalize keys: lower-case & trimmed
+      ROSTER = raw.map(row => {
+        const o = {};
+        Object.keys(row).forEach(k => o[String(k).trim().toLowerCase()] = row[k]);
+        return o;
+      });
 
-    const cities = uniq(ROSTER.map(r => t(r.city)));
-    $("city").innerHTML = `<option value="">Select City</option>` +
-      cities.sort().map(c => `<option value="${c}">${c}</option>`).join('');
-  } catch (e) {
-    console.error('Roster load failed:', e);
-    $("city").innerHTML = `<option value="">Failed to load roster</option>`;
+      const cities = uniq(ROSTER.map(r => t(r.city)));
+      $("city").innerHTML = `<option value="">Select City</option>` +
+        cities.sort().map(c => `<option value="${c}">${c}</option>`).join('');
+
+      status.textContent = `Loaded ${ROSTER.length} rows`;
+      return; // success, stop trying
+    } catch (e) {
+      console.warn('Roster load failed from', url, e);
+    }
   }
+  $("city").innerHTML = `<option value="">Failed to load roster</option>`;
+  $("dataStatus").textContent = "Roster load failed";
 }
+
 $("city").addEventListener("change", ()=>{
   selected.city = $("city").value;
   const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
@@ -235,6 +248,7 @@ $("city").addEventListener("change", ()=>{
   $("rep").innerHTML = `<option value="">Select Your Name</option>`;
   ["storeIdBadge","refBadge","faceStatus"].forEach(id => $(id).style.display="none");
 });
+
 $("mall").addEventListener("change", ()=>{
   selected.mall = $("mall").value;
   const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
@@ -242,6 +256,7 @@ $("mall").addEventListener("change", ()=>{
     reps.sort().map(r => `<option value="${r}">${r}</option>`).join('');
   ["storeIdBadge","refBadge","faceStatus"].forEach(id => $(id).style.display="none");
 });
+
 $("rep").addEventListener("change", ()=>{
   selected.rep = $("rep").value;
   const row = ROSTER.find(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall) && t(r.salesperson)===t(selected.rep)) || {};
