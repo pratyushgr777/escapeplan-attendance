@@ -62,7 +62,7 @@
   .banner h3{margin:0 0 6px 0;font-size:18px}
   .banner p{margin:0;color:var(--muted);font-size:13px}
   .banner.ok{border-color:rgba(22,163,74,.35);background:linear-gradient(180deg, rgba(16,185,129,.16), rgba(16,185,129,.10))}
-  .banner.warn{border-color:rgba(245,158,11,.35);background:linear-gradient(180deg, rgba(245,158,11,.18), rgba(245,158,11,.10))}
+  .banner.warn{border-color:rgba(245,158,11,.35);background:linear-gradient(180deg, rgba(245,158,11,.18), rgba(251,191,36,.10))}
   .banner.bad{border-color:rgba(239,68,68,.4);background:linear-gradient(180deg, rgba(239,68,68,.20), rgba(239,68,68,.12))}
 </style>
 </head>
@@ -112,7 +112,7 @@
     <div class="h">Location</div>
     <div class="b">
       <div class="row">
-        <button id="locBtn" class="btn primary">Use My Location</button>
+        <button id="locBtn" class="btn primary" type="button">Use My Location</button>
         <span id="locStatus" class="badge">Waiting…</span>
       </div>
       <div class="row" style="margin-top:10px">
@@ -139,8 +139,8 @@
     <div class="h">Submit</div>
     <div class="b">
       <div class="row">
-        <button id="submitBtn" class="btn primary" disabled>Submit Attendance</button>
-        <button id="resetBtn" class="btn alt">Reset</button>
+        <button id="submitBtn" class="btn primary" type="button" disabled>Submit Attendance</button>
+        <button id="resetBtn" class="btn alt" type="button">Reset</button>
         <span id="readyHint" class="badge">Complete steps to enable</span>
       </div>
 
@@ -157,6 +157,9 @@
 </main>
 
 <script>
+/* Block any accidental form submit that would reload the page */
+document.addEventListener('submit', (e) => { e.preventDefault(); e.stopPropagation(); });
+
 /* ===== CONFIG ===== */
 const ROSTER_SHEET_ID = '13od8p_pcVQsMGHVqhoI-bOrW3xDeOKNeM4rf0uc8PX4';
 const ROSTER_TAB_NAME = 'Roster';
@@ -166,7 +169,8 @@ const ROSTER_URLS = [
   `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`
 ];
 
-/* ===== STATE ===== */
+/* ===== STATE (with persistence) ===== */
+const STATE_KEY = 'ep_att_state_v2';
 let ROSTER = [];
 let attendanceType = 'Login';
 let selected = { city:'', mall:'', rep:'', storeId:'', refLat:null, refLon:null };
@@ -176,10 +180,30 @@ let photoBase64 = '';
 let addressText = '';
 let clientTsIST = '';
 
-/* ===== HELPERS ===== */
 const $ = id => document.getElementById(id);
 const t = v => v==null ? '' : String(v).trim();
 const num = v => { const x = parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(x)?x:NaN; };
+
+function saveState(partial={}){
+  try{
+    const st = { attendanceType, selected, userLat, userLon, lastAccuracy, addressText, clientTsIST, photoBase64, ...partial };
+    sessionStorage.setItem(STATE_KEY, JSON.stringify(st));
+  }catch{}
+}
+function loadState(){
+  try{
+    const s = sessionStorage.getItem(STATE_KEY);
+    return s ? JSON.parse(s) : null;
+  }catch{ return null; }
+}
+function clearState(){ try{ sessionStorage.removeItem(STATE_KEY); }catch{} }
+
+/* Save before we leave to camera or tab gets hidden */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveState({ reason:'hidden' });
+});
+
+/* ===== HELPERS ===== */
 function uniq(a){ return Array.from(new Set(a.filter(x => t(x) !== ''))); }
 function haversineMeters(lat1, lon1, lat2, lon2){
   const toRad = d=>d*Math.PI/180, R=6371000;
@@ -213,8 +237,12 @@ function firstSuccess(promises){
     });
   });
 }
-
-/* ===== Enable/disable submit ===== */
+function setProximityBadge(m){
+  const el = $("proximity"); el.style.display="inline-flex";
+  if (m < 100){ el.textContent = "OK (<100m)"; el.className = "badge ok"; }
+  else if (m <= 250){ el.textContent = "Check (100–250m)"; el.className = "badge warn"; }
+  else { el.textContent = "Not captured (>250m)"; el.className = "badge bad"; }
+}
 function updateSubmitEnabled(){
   const ready = selected.city && selected.mall && selected.rep &&
                 userLat!=null && userLon!=null && !!photoBase64;
@@ -222,19 +250,72 @@ function updateSubmitEnabled(){
   $("readyHint").textContent = ready ? "Ready to submit" : "Complete steps to enable";
 }
 
-/* ===== LOAD ROSTER ===== */
+/* ===== LOAD ROSTER + optional restore ===== */
+let RESTORED = loadState(); // read once on boot
+
 async function loadRoster(){
   const status = $("dataStatus");
   status.textContent = "Loading roster…";
   try{
     const raw = await firstSuccess(ROSTER_URLS.map(u => fetchJsonWithTimeout(u, 8000)));
-    ROSTER = raw.map(row => {
-      const o = {}; Object.keys(row).forEach(k => o[String(k).trim().toLowerCase()] = row[k]); return o;
-    });
+    ROSTER = raw.map(row => { const o={}; Object.keys(row).forEach(k=>o[String(k).trim().toLowerCase()]=row[k]); return o; });
     const cities = uniq(ROSTER.map(r => t(r.city)));
-    $("city").innerHTML = `<option value="">Select City</option>` +
-      cities.sort().map(c => `<option value="${c}">${c}</option>`).join('');
+    $("city").innerHTML = `<option value="">Select City</option>` + cities.sort().map(c=>`<option>${c}</option>`).join('');
     status.textContent = `Loaded ${ROSTER.length} rows`;
+
+    // Apply restored selection if any
+    if (RESTORED && RESTORED.selected){
+      attendanceType = RESTORED.attendanceType || 'Login';
+      document.querySelectorAll('#typeSeg button').forEach(b=>{
+        b.classList.toggle('active', b.dataset.type === attendanceType);
+      });
+
+      if (RESTORED.selected.city){
+        $("city").value = RESTORED.selected.city;
+        selected.city = RESTORED.selected.city;
+
+        const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
+        $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option>${m}</option>`).join('');
+
+        if (RESTORED.selected.mall){
+          $("mall").value = RESTORED.selected.mall;
+          selected.mall = RESTORED.selected.mall;
+
+          const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
+          $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option>${r}</option>`).join('');
+
+          if (RESTORED.selected.rep){
+            $("rep").value = RESTORED.selected.rep;
+            selected.rep = RESTORED.selected.rep;
+
+            const row = ROSTER.find(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall) && t(r.salesperson)===t(selected.rep)) || {};
+            selected.storeId = t(row['store id']);
+            selected.refLat  = num(row['ref lat']);
+            selected.refLon  = num(row['ref lon']);
+            if (selected.storeId){ $("storeIdBadge").textContent = "Store ID: " + selected.storeId; $("storeIdBadge").style.display="inline-flex"; }
+            if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
+              $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
+              $("refBadge").style.display="inline-flex";
+            }
+          }
+        }
+      }
+
+      if (Number.isFinite(RESTORED.userLat) && Number.isFinite(RESTORED.userLon)){
+        userLat = RESTORED.userLat; userLon = RESTORED.userLon; lastAccuracy = RESTORED.lastAccuracy||null;
+        clientTsIST = RESTORED.clientTsIST || '';
+        $("locStatus").textContent = `Live: ${userLat.toFixed(5)}, ${userLon.toFixed(5)}${lastAccuracy?` (±${lastAccuracy}m)`:''}`;
+        if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
+          const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
+          $("distance").textContent = `${m} m`; setProximityBadge(m);
+        }
+      }
+      if (RESTORED.addressText){ addressText = RESTORED.addressText; $("addrLine").textContent = `Address: ${addressText}`; }
+
+      updateSubmitEnabled();
+      RESTORED = null;
+    }
+
   }catch(e){
     $("city").innerHTML = `<option value="">Failed to load roster</option>`;
     status.textContent = "Load failed — tap to retry";
@@ -248,6 +329,7 @@ document.querySelectorAll('#typeSeg button').forEach(btn=>{
     document.querySelectorAll('#typeSeg button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     attendanceType = btn.dataset.type || 'Login';
+    saveState({ attendanceType });
   });
 });
 
@@ -255,19 +337,17 @@ document.querySelectorAll('#typeSeg button').forEach(btn=>{
 $("city").addEventListener("change", ()=>{
   selected.city = $("city").value;
   const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
-  $("mall").innerHTML = `<option value="">Select Mall</option>` +
-    malls.sort().map(m => `<option value="${m}">${m}</option>`).join('');
+  $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option>${m}</option>`).join('');
   $("rep").innerHTML = `<option value="">Select Your Name</option>`;
   ["storeIdBadge","refBadge"].forEach(id => $(id).style.display="none");
-  updateSubmitEnabled();
+  saveState(); updateSubmitEnabled();
 });
 $("mall").addEventListener("change", ()=>{
   selected.mall = $("mall").value;
   const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
-  $("rep").innerHTML = `<option value="">Select Your Name</option>` +
-    reps.sort().map(r => `<option value="${r}">${r}</option>`).join('');
+  $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option>${r}</option>`).join('');
   ["storeIdBadge","refBadge"].forEach(id => $(id).style.display="none");
-  updateSubmitEnabled();
+  saveState(); updateSubmitEnabled();
 });
 $("rep").addEventListener("change", ()=>{
   selected.rep = $("rep").value;
@@ -280,7 +360,7 @@ $("rep").addEventListener("change", ()=>{
     $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
     $("refBadge").style.display="inline-flex";
   }
-  updateSubmitEnabled();
+  saveState(); updateSubmitEnabled();
 });
 
 /* ===== GEO ===== */
@@ -296,15 +376,11 @@ $("locBtn").addEventListener("click", ()=>{
       $("locStatus").textContent = `Live: ${userLat.toFixed(5)}, ${userLon.toFixed(5)} (±${lastAccuracy}m)`;
       if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
         const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
-        $("distance").textContent = `${m} m`;
-        const p = $("proximity"); p.style.display="inline-flex";
-        if (m < 100){ p.textContent="OK (<100m)"; p.className="badge ok"; }
-        else if (m<=250){ p.textContent="Check (100–250m)"; p.className="badge warn"; }
-        else { p.textContent="Not captured (>250m)"; p.className="badge bad"; }
+        $("distance").textContent = `${m} m`; setProximityBadge(m);
       }
       addressText = await reverseGeocode(userLat, userLon);
       $("addrLine").textContent = addressText ? `Address: ${addressText}` : '';
-      updateSubmitEnabled();
+      saveState(); updateSubmitEnabled();
     },
     err=>{ $("locStatus").textContent = "Location denied or unavailable"; },
     { enableHighAccuracy:true, maximumAge:5000, timeout:15000 }
@@ -312,6 +388,7 @@ $("locBtn").addEventListener("click", ()=>{
 });
 
 /* ===== PHOTO (watermark) ===== */
+$("photo").addEventListener("click", ()=>{ saveState({ reason:'before-camera' }); });
 $("photo").addEventListener("change", async (e)=>{
   const f = e.target.files && e.target.files[0]; if (!f) return;
   const reader = new FileReader();
@@ -323,7 +400,6 @@ $("photo").addEventListener("change", async (e)=>{
       const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
-      // Watermark strip
       ctx.fillStyle = 'rgba(0,0,0,0.58)'; ctx.fillRect(0, h-86, w, 86);
       ctx.fillStyle = '#fff'; ctx.font = '16px system-ui, Segoe UI, Roboto, Arial';
       const ts = clientTsIST || nowIST();
@@ -335,14 +411,14 @@ $("photo").addEventListener("change", async (e)=>{
       ctx.fillText(line2, 10, h-20);
       photoBase64 = canvas.toDataURL('image/jpeg', 0.85);
       $("preview").src = photoBase64; $("preview").style.display = "block";
-      updateSubmitEnabled();
+      saveState(); updateSubmitEnabled();
     };
     img.src = reader.result;
   };
   reader.readAsDataURL(f);
 });
 
-/* ===== Big result banner ===== */
+/* ===== Result banner ===== */
 function showBanner(kind, distance, receiptId){
   const bn = $("resultBanner"), title = $("bannerTitle"), sub = $("bannerSub");
   bn.className = "banner " + (kind==="ok"?"ok":kind==="warn"?"warn":"bad");
@@ -392,17 +468,20 @@ $("submitBtn").addEventListener("click", async ()=>{
         showBanner("ok", null, data.receiptId);
       }
       btn.textContent = "Submitted ✓"; // stays disabled
+      clearState(); // done
     } else {
       btn.textContent = "Submit Attendance"; btn.disabled = false;
       showBanner("bad", null, null);
       $("bannerTitle").textContent = "Submission failed";
       $("bannerSub").textContent  = (data.error || "Check network and try again.");
+      saveState();
     }
   }catch(e){
     btn.textContent = "Submit Attendance"; btn.disabled = false;
     showBanner("bad", null, null);
     $("bannerTitle").textContent = "Network error";
     $("bannerSub").textContent  = "Please check your connection and try again.";
+    saveState();
   }
 });
 
@@ -419,9 +498,11 @@ $("resetBtn").addEventListener("click", ()=>{
   $("submitBtn").textContent = "Submit Attendance"; $("submitBtn").disabled = true;
   $("readyHint").textContent = "Complete steps to enable";
   if (watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  saveState();
 });
 
 /* ===== Boot ===== */
+window.addEventListener('pageshow', ()=>{ /* restore hook if browser kept state */ });
 loadRoster();
 </script>
 </body>
