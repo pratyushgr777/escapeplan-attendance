@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EscapePlan – Manager Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1024">
+<style>
+  :root{
+    --bg1:#050815; --bg2:#0b1024; --stroke:rgba(255,255,255,.14);
+    --text:#eaf2ff; --muted:#b3c0d9;
+    --accent:#22d3ee; --violet:#7c3aed;
+    --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444;
+    --card:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+    --radius:16px; --shadow:0 16px 48px rgba(7,9,26,.6)
+  }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{
+    margin:0; color:var(--text); font-family:Inter,system-ui,Segoe UI,Roboto,Arial;
+    background:
+      radial-gradient(900px 520px at -10% -10%, rgba(34,211,238,.25), transparent 55%),
+      radial-gradient(900px 520px at 110% 10%, rgba(124,58,237,.20), transparent 55%),
+      linear-gradient(160deg, var(--bg1), var(--bg2));
+  }
+  .appbar{position:sticky;top:0;z-index:40;border-bottom:1px solid var(--stroke);
+    background:linear-gradient(180deg, rgba(5,8,21,.85), rgba(5,8,21,.65))}
+  .appbar-inner{max-width:1000px;margin:0 auto;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:900}
+  .logo{width:26px;height:26px;border-radius:50%;
+    background:conic-gradient(from 180deg, var(--accent), var(--violet), #f43f5e, var(--accent))}
+  .pill{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--stroke);
+    background:linear-gradient(90deg, rgba(34,211,238,.15), rgba(124,58,237,.15)); cursor:pointer}
+  .wrap{max-width:1000px;margin:18px auto 28px;padding:0 16px;display:grid;gap:16px}
+  .panel{border-radius:var(--radius);border:1px solid var(--stroke);background:var(--card);box-shadow:var(--shadow);overflow:hidden}
+  .h{padding:12px 16px;font-weight:900;border-bottom:1px solid var(--stroke)}
+  .b{padding:14px}
+  .grid{display:grid;gap:12px}
+  @media(min-width:860px){.grid-2{grid-template-columns:1fr 1fr}.grid-3{grid-template-columns:1fr 1fr 1fr}.grid-4{grid-template-columns:1fr 1fr 1fr 1fr}}
+  label{display:block;font-size:12px;color:var(--muted);margin:6px 2px}
+  select,input[type="date"]{
+    width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--stroke);
+    background:linear-gradient(180deg, rgba(5,8,21,.85), rgba(5,8,21,.75));color:var(--text);font-size:15px
+  }
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{border:1px solid var(--stroke);border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;transition:.2s}
+  .btn.primary{color:#0b1024;background:linear-gradient(90deg,#22d3ee,#7c3aed)}
+  .btn.alt{color:#eaf2ff;background:linear-gradient(90deg,rgba(124,58,237,.25),rgba(34,211,238,.25))}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(min-width:720px){.kpis{grid-template-columns:repeat(4,1fr)}}
+  .k{border:1px solid var(--stroke);border-radius:14px;padding:12px;background:var(--card)}
+  .k .v{font-size:22px;font-weight:900;margin-top:4px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:10px 8px;border-bottom:1px solid var(--stroke);font-size:14px}
+  th{color:#cfe1ff;text-align:left}
+  .badge{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--stroke);background:rgba(255,255,255,.06)}
+  .ok{color:#d1fae5;border-color:rgba(22,163,74,.35);background:linear-gradient(90deg,rgba(16,185,129,.15),rgba(34,197,94,.1))}
+  .warn{color:#ffefcc;border-color:rgba(245,158,11,.35);background:linear-gradient(90deg,rgba(245,158,11,.18),rgba(251,191,36,.12))}
+  .bad{color:#ffd6d6;border-color:rgba(239,68,68,.4);background:linear-gradient(90deg,rgba(239,68,68,.20),rgba(239,68,68,.12))}
+  .muted{color:var(--muted);font-size:12px}
+  .right{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+  .foot{color:var(--muted);font-size:12px;text-align:center;padding:12px 0 24px}
+  .chip{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--stroke);cursor:pointer}
+  .chip.active{background:linear-gradient(90deg,rgba(34,211,238,.25),rgba(124,58,237,.25))}
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-inner">
+    <div class="brand"><div class="logo"></div>EscapePlan – Manager Dashboard</div>
+    <div class="pill" id="loadStatus">Loading…</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Filters -->
+  <section class="panel">
+    <div class="h">Filters</div>
+    <div class="b">
+      <div class="grid grid-3">
+        <div>
+          <label>Start date</label>
+          <input type="date" id="startDate">
+        </div>
+        <div>
+          <label>End date</label>
+          <input type="date" id="endDate">
+        </div>
+        <div>
+          <label>Mall</label>
+          <select id="mall"><option value="">All malls</option></select>
+        </div>
+      </div>
+      <div class="grid grid-2" style="margin-top:8px">
+        <div>
+          <label>Salesperson</label>
+          <select id="rep"><option value="">All salespeople</option></select>
+        </div>
+        <div class="right">
+          <span class="chip" data-q="today">Today</span>
+          <span class="chip" data-q="yday">Yesterday</span>
+          <span class="chip" data-q="week">This Week</span>
+          <span class="chip" data-q="month">This Month</span>
+          <button class="btn alt" id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:6px">Data source: “Daily Mall Totals”, “Daily Incentives by Person”, and “Thresholds” tabs in your incentives workbook.</div>
+    </div>
+  </section>
+
+  <!-- KPIs -->
+  <section class="panel">
+    <div class="h">Summary</div>
+    <div class="b kpis">
+      <div class="k"><div class="muted">Total Units</div><div class="v" id="kUnits">—</div></div>
+      <div class="k"><div class="muted">Total Incentive (₹)</div><div class="v" id="kIncent">—</div></div>
+      <div class="k"><div class="muted">Mall-days ≥ threshold</div><div class="v" id="kMallDays">—</div></div>
+      <div class="k"><div class="muted">Active Reps</div><div class="v" id="kReps">—</div></div>
+    </div>
+  </section>
+
+  <!-- Tables -->
+  <section class="panel">
+    <div class="h">Malls (by units)</div>
+    <div class="b">
+      <table id="mallTbl">
+        <thead><tr><th>Mall</th><th>Units</th><th>Threshold</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" style="margin-top:6px">Status is computed per mall over the chosen date range: “Met” means total units ≥ threshold × number of days included.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="h">Top Salespeople</div>
+    <div class="b">
+      <table id="repTbl">
+        <thead><tr><th>Salesperson</th><th>Mall</th><th>Units</th><th>Incentive (₹)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Share -->
+  <section class="panel">
+    <div class="h">Share</div>
+    <div class="b right">
+      <button class="btn alt" id="copyBtn">Copy report</button>
+      <a class="btn primary" id="waBtn" target="_blank" rel="noopener">Share on WhatsApp</a>
+    </div>
+  </section>
+
+  <div class="foot">Tip: Use the quick chips (Today/Yesterday/Week/Month) for fast reporting.</div>
+</main>
+
+<script>
+/*** CONFIG ***/
+const SHEET_ID = '1HtIALl-lYGtyptBOHM0IQLm2svNZrZR-xdlm5Ay2g_g';
+const TAB_MALL = 'Daily Mall Totals';
+const TAB_PERSON = 'Daily Incentives by Person';
+const TAB_THRESH = 'Thresholds';
+const SOURCES = [
+  (tab)=>`https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(tab)}`,
+  (tab)=>`https://opensheet.vercel.app/${SHEET_ID}/${encodeURIComponent(tab)}`
+];
+
+/*** STATE ***/
+let mallRows = [];      // [{date,mall,units}]
+let personRows = [];    // [{date,mall,rep,units,incent}]
+let thresholds = {};    // mall -> threshold (number)
+let allMalls = new Set();
+let allReps = new Set();
+
+/*** UTIL ***/
+const $ = (id)=>document.getElementById(id);
+const t = v => v==null ? '' : String(v).trim();
+const num = v => { const n = parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(n)?n:0; };
+
+function parseTxDate(s){
+  const v = t(s);
+  if(!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { // yyyy-mm-dd
+    const [y,m,d] = v.split('-').map(x=>+x);
+    return new Date(y, m-1, d);
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) { // dd/mm/yyyy
+    const [d,m,y] = v.split('/').map(x=>+x);
+    return new Date(y, m-1, d);
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+function fmtINR(n){
+  try{
+    return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n||0);
+  }catch{ return String(Math.round(n||0)); }
+}
+function dateRangeLabel(d1, d2){
+  const opt = { day:'2-digit', month:'short' };
+  const yopt = { day:'2-digit', month:'short', year:'numeric' };
+  if (!d1 || !d2) return '—';
+  if (d1.getTime() === d2.getTime()) return d1.toLocaleDateString('en-GB', yopt);
+  const sameYear = d1.getFullYear() === d2.getFullYear();
+  const a = d1.toLocaleDateString('en-GB', sameYear ? opt : yopt);
+  const b = d2.toLocaleDateString('en-GB', yopt);
+  return `${a} – ${b}`;
+}
+function getISTToday(){
+  const now = new Date();
+  const tzNow = new Date(now.toLocaleString('en-US',{ timeZone:'Asia/Kolkata' }));
+  return new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
+}
+
+/*** DATA LOAD ***/
+async function fetchFirst(tab){
+  let lastErr;
+  for (const make of SOURCES){
+    const url = make(tab);
+    try{
+      const r = await fetch(url, { headers:{ 'Accept':'application/json' }, cache:'no-store' });
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      return await r.json();
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('All sources failed for '+tab);
+}
+
+async function loadAll(){
+  $("loadStatus").textContent = "Loading…";
+  const [mall, person, th] = await Promise.all([
+    fetchFirst(TAB_MALL),
+    fetchFirst(TAB_PERSON),
+    fetchFirst(TAB_THRESH)
+  ]);
+  // Normalize
+  mallRows = mall.map(r => ({
+    date: parseTxDate(r['Tx Date']),
+    mall: t(r['Mall']),
+    units: num(r['Units'])
+  })).filter(r => r.date && r.mall);
+
+  personRows = person.map(r => ({
+    date: parseTxDate(r['Tx Date']),
+    mall: t(r['Mall']),
+    rep:  t(r['Salesperson']),
+    units: num(r['Units']),
+    incent: num(r['Incentive₹'])
+  })).filter(r => r.date && r.mall && r.rep);
+
+  thresholds = {};
+  th.forEach(r => { const m = t(r['Mall']); const thr = num(r['Threshold Units']); if (m) thresholds[m] = thr; });
+
+  allMalls = new Set(mallRows.map(r=>r.mall));
+  allReps  = new Set(personRows.map(r=>r.rep));
+
+  // Fill filter dropdowns
+  $("mall").innerHTML = `<option value="">All malls</option>` + [...allMalls].sort().map(m=>`<option>${m}</option>`).join('');
+  $("rep").innerHTML  = `<option value="">All salespeople</option>` + [...allReps].sort().map(r=>`<option>${r}</option>`).join('');
+
+  $("loadStatus").textContent = `Loaded ✓`;
+  applyFilters();
+}
+
+/*** FILTERING & RENDER ***/
+function getFilters(){
+  const sd = $("startDate").value ? parseTxDate($("startDate").value) : null;
+  const ed = $("endDate").value ? parseTxDate($("endDate").value) : null;
+  return { sd, ed, mall: $("mall").value, rep: $("rep").value };
+}
+
+function within(d, sd, ed){
+  if (!d) return false;
+  if (sd && d < sd) return false;
+  if (ed && d > ed) return false;
+  return true;
+}
+
+function applyFilters(){
+  const { sd, ed, mall, rep } = getFilters();
+
+  const mf = mallRows.filter(r => within(r.date, sd, ed) && (!mall || r.mall === mall));
+  const pf = personRows.filter(r => within(r.date, sd, ed) && (!mall || r.mall === mall) && (!rep || r.rep === rep));
+
+  // KPI totals
+  const totalUnits = mf.reduce((s,r)=>s+r.units, 0);
+  const totalIncent = pf.reduce((s,r)=>s+r.incent, 0);
+  const activeReps = new Set(pf.map(r=>r.rep)).size;
+
+  // Mall-days ≥ threshold (count each date×mall meeting daily threshold)
+  let mallDayHits = 0;
+  if (!rep){ // only meaningful when not drilling into a single rep
+    // Build date->mall->sum units
+    const key = d => d.toISOString().slice(0,10);
+    const byDayMall = {};
+    mf.forEach(r=>{
+      const kd = key(r.date);
+      byDayMall[kd] = byDayMall[kd] || {};
+      byDayMall[kd][r.mall] = (byDayMall[kd][r.mall] || 0) + r.units;
+    });
+    Object.keys(byDayMall).forEach(kd=>{
+      Object.entries(byDayMall[kd]).forEach(([mallName, units])=>{
+        const thr = thresholds[mallName] ?? 0;
+        if (units >= thr) mallDayHits++;
+      });
+    });
+  }
+
+  $("kUnits").textContent = fmtINR(totalUnits);
+  $("kIncent").textContent = "₹ " + fmtINR(totalIncent);
+  $("kMallDays").textContent = fmtINR(mallDayHits);
+  $("kReps").textContent = fmtINR(activeReps);
+
+  // Malls table (merge over range): sum units per mall, compute “range threshold” = dailyThr * #daysSeenForThatMall
+  const daysInRange = new Set(mf.map(r => r.date.toISOString().slice(0,10))); // total unique days with any data
+  const mallAgg = {};
+  mf.forEach(r=>{
+    mallAgg[r.mall] = mallAgg[r.mall] || { mall:r.mall, units:0, daySet:new Set() };
+    mallAgg[r.mall].units += r.units;
+    mallAgg[r.mall].daySet.add(r.date.toISOString().slice(0,10));
+  });
+  const mallList = Object.values(mallAgg).map(m=>{
+    const dcount = m.daySet.size || (sd && ed ? Math.round((ed - sd)/86400000)+1 : daysInRange.size || 1);
+    const thr = (thresholds[m.mall] ?? 0) * dcount;
+    return { mall:m.mall, units:m.units, rangeThr:thr, status: m.units >= thr ? 'Met' : 'Not met' };
+  }).sort((a,b)=>b.units - a.units);
+
+  const mtb = $("mallTbl").querySelector("tbody");
+  mtb.innerHTML = mallList.map(x=>`
+    <tr>
+      <td>${x.mall}</td>
+      <td>${fmtINR(x.units)}</td>
+      <td>${fmtINR(x.rangeThr)}</td>
+      <td><span class="badge ${x.status==='Met'?'ok':'bad'}">${x.status}</span></td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="muted">No data</td></tr>`;
+
+  // Reps table
+  // If a mall is chosen, sort reps in that mall; else overall top reps
+  const repAgg = {};
+  pf.forEach(r=>{
+    const key = r.rep + '||' + r.mall;
+    if (!repAgg[key]) repAgg[key] = { rep:r.rep, mall:r.mall, units:0, incent:0 };
+    repAgg[key].units += r.units;
+    repAgg[key].incent += r.incent;
+  });
+  const repList = Object.values(repAgg).sort((a,b)=> b.incent - a.incent || b.units - a.units).slice(0,50);
+  const rtb = $("repTbl").querySelector("tbody");
+  rtb.innerHTML = repList.map(x=>`
+    <tr>
+      <td>${x.rep}</td>
+      <td>${x.mall}</td>
+      <td>${fmtINR(x.units)}</td>
+      <td>₹ ${fmtINR(x.incent)}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="muted">No data</td></tr>`;
+
+  // Update share links
+  updateShare(sd, ed, mall, rep, totalUnits, totalIncent, mallList.slice(0,5), repList.slice(0,5));
+}
+
+/*** SHARE ***/
+function updateShare(sd, ed, mall, rep, totalUnits, totalIncent, topMalls, topReps){
+  const title = `EscapePlan Summary (${dateRangeLabel(sd,ed)})`;
+  const scope = [mall?`Mall: ${mall}`:null, rep?`Rep: ${rep}`:null].filter(Boolean).join(' • ');
+  const lines = [];
+  if (scope) lines.push(scope);
+  lines.push(`Units: ${fmtINR(totalUnits)} • Incentive: ₹ ${fmtINR(totalIncent)}`);
+  if (topMalls.length){
+    lines.push(`Top malls:`);
+    topMalls.forEach(m=>lines.push(`• ${m.mall}: ${fmtINR(m.units)} (thr ${fmtINR(m.rangeThr)} – ${m.status})`));
+  }
+  if (topReps.length){
+    lines.push(`Top reps:`);
+    topReps.forEach(r=>lines.push(`• ${r.rep} @ ${r.mall}: ${fmtINR(r.units)} units, ₹ ${fmtINR(r.incent)}`));
+  }
+  const text = [title, ...lines].join('\n');
+  $("copyBtn").onclick = async ()=>{
+    try{ await navigator.clipboard.writeText(text); $("copyBtn").textContent = "Copied ✓"; setTimeout(()=>$("copyBtn").textContent="Copy report",1500); }
+    catch{ alert("Copy failed. Long-press to copy manually."); }
+  };
+  $("waBtn").href = "https://wa.me/?text=" + encodeURIComponent(text);
+}
+
+/*** QUICK CHIPS ***/
+function setQuick(range){
+  const today = getISTToday();
+  const d = new Date(today);
+  let s = new Date(today), e = new Date(today);
+  if (range==='yday'){ s = new Date(today.getTime()-86400000); e = s; }
+  if (range==='week'){
+    const day = today.getDay(); // 0 Sun..6 Sat
+    const monday = new Date(today); monday.setDate(today.getDate() - ((day+6)%7));
+    s = monday; e = today;
+  }
+  if (range==='month'){ s = new Date(today.getFullYear(), today.getMonth(), 1); e = today; }
+  $("startDate").value = s.toISOString().slice(0,10);
+  $("endDate").value   = e.toISOString().slice(0,10);
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+  const chip = document.querySelector(`.chip[data-q="${range}"]`); if (chip) chip.classList.add('active');
+  applyFilters();
+}
+
+/*** EVENTS ***/
+["startDate","endDate","mall","rep"].forEach(id => $(id).addEventListener("change", applyFilters));
+document.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', ()=>setQuick(chip.dataset.q)));
+$("refreshBtn").addEventListener("click", loadAll);
+
+/*** BOOT ***/
+(function init(){
+  // Default to Today
+  const t = getISTToday();
+  $("startDate").value = t.toISOString().slice(0,10);
+  $("endDate").value   = t.toISOString().slice(0,10);
+  loadAll().catch(e=>{
+    $("loadStatus").textContent = "Load failed";
+    alert("Failed to load data. Check sheet sharing and tab names.\n" + e);
+  });
+})();
+</script>
+</body>
+</html>
