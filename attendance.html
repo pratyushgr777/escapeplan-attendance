@@ -419,18 +419,24 @@ $("photo").addEventListener("change", async (e)=>{
 });
 
 /* ===== Result banner ===== */
+/* UPDATED: always shows Mall • Distance • Time (IST) for OK / Check / Not captured */
 function showBanner(kind, distance, receiptId){
   const bn = $("resultBanner"), title = $("bannerTitle"), sub = $("bannerSub");
+  const mallName = selected.mall || '—';
+  const whenIST  = clientTsIST || nowIST();
+  const distTxt  = (typeof distance === 'number') ? `${distance} m` : '— m';
+
   bn.className = "banner " + (kind==="ok"?"ok":kind==="warn"?"warn":"bad");
+
   if (kind==="ok"){
     title.textContent = `${attendanceType} captured ✅`;
-    sub.textContent = distance!=null ? `Distance: ${distance} m${receiptId?` • Receipt: ${receiptId}`:''}` : (receiptId?`Receipt: ${receiptId}`:'');
+    sub.textContent = `Mall: ${mallName} • Distance: ${distTxt} • Time (IST): ${whenIST}${receiptId?` • Receipt: ${receiptId}`:''}`;
   } else if (kind==="warn"){
     title.textContent = "Please check ⚠️";
-    sub.textContent = `You are ${distance} m from store (100–250 m). Reload & retake if manager asks.`;
+    sub.textContent = `Mall: ${mallName} • Distance: ${distTxt} • Time (IST): ${whenIST}. If required, go to the entrance and retake.`;
   } else {
     title.textContent = `${attendanceType} NOT captured ❌`;
-    sub.textContent = `You are ${distance} m away. Go to the store entrance, reload and take attendance again.`;
+    sub.textContent = `Mall: ${mallName} • Distance: ${distTxt} • Time (IST): ${whenIST}. Go to the store entrance, reload and take attendance again.`;
   }
   bn.style.display = "block";
 }
