@@ -157,26 +157,29 @@
 </main>
 
 <script>
-/* Block any accidental form submit that would reload the page */
-document.addEventListener('submit', (e) => { e.preventDefault(); e.stopPropagation(); });
+/* prevent accidental form submit reload */
+document.addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); });
 
 /* ===== CONFIG ===== */
 const ROSTER_SHEET_ID = '13od8p_pcVQsMGHVqhoI-bOrW3xDeOKNeM4rf0uc8PX4';
 const ROSTER_TAB_NAME = 'Roster';
 const GAS_WEBAPP_URL  = 'https://script.google.com/macros/s/AKfycbzUDKjO8sHe9tLB52OKFvnSyQxJWNARdaGDzWgvxd_P8p6_tp6a2Z-jG5ev8KTKsCTd/exec';
-const ROSTER_URLS = [
-  `https://opensheet.elk.sh/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`,
-  `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}`
+
+/* 3 sources: two opensheet mirrors, then Google GViz (direct) */
+const ROSTER_SOURCES = [
+  { kind:'json', url: `https://opensheet.elk.sh/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}` },
+  { kind:'json', url: `https://opensheet.vercel.app/${ROSTER_SHEET_ID}/${encodeURIComponent(ROSTER_TAB_NAME)}` },
+  { kind:'gviz', url: `https://docs.google.com/spreadsheets/d/${ROSTER_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(ROSTER_TAB_NAME)}` },
 ];
 
 /* ===== STATE (with persistence) ===== */
-const STATE_KEY = 'ep_att_state_v2';
+const STATE_KEY = 'ep_att_state_v3';
 let ROSTER = [];
 let attendanceType = 'Login';
 let selected = { city:'', mall:'', rep:'', storeId:'', refLat:null, refLon:null };
 let userLat = null, userLon = null, lastAccuracy = null;
 let watchId = null;
-let photoBase64 = '';
+let photoBase64 = '';              // kept only in-memory (not persisted)
 let addressText = '';
 let clientTsIST = '';
 
@@ -186,19 +189,20 @@ const num = v => { const x = parseFloat(String(v).replace(/,/g,'')); return Numb
 
 function saveState(partial={}){
   try{
-    const st = { attendanceType, selected, userLat, userLon, lastAccuracy, addressText, clientTsIST, photoBase64, ...partial };
+    const st = {
+      attendanceType, selected, userLat, userLon, lastAccuracy,
+      addressText, clientTsIST,
+      ...partial
+    };
+    // DO NOT store photoBase64 to keep memory low on small phones
     sessionStorage.setItem(STATE_KEY, JSON.stringify(st));
   }catch{}
 }
 function loadState(){
-  try{
-    const s = sessionStorage.getItem(STATE_KEY);
-    return s ? JSON.parse(s) : null;
-  }catch{ return null; }
+  try{ const s = sessionStorage.getItem(STATE_KEY); return s ? JSON.parse(s) : null; }catch{ return null; }
 }
 function clearState(){ try{ sessionStorage.removeItem(STATE_KEY); }catch{} }
 
-/* Save before we leave to camera or tab gets hidden */
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveState({ reason:'hidden' });
 });
@@ -212,31 +216,141 @@ function haversineMeters(lat1, lon1, lat2, lon2){
   return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
 }
 function nowIST(){ return new Date().toLocaleString('en-IN',{ timeZone:'Asia/Kolkata', hour12:false }); }
-async function reverseGeocode(lat, lon){
+
+let lastGeocodeAt = 0;
+async function reverseGeocodeThrottled(lat, lon){
+  const now = Date.now();
+  if (now - lastGeocodeAt < 15000) return addressText; // 15s throttle
+  lastGeocodeAt = now;
   try{
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=16&addressdetails=1`;
     const res = await fetch(url, { headers:{ 'Accept':'application/json' }});
     const j = await res.json();
     return j.display_name || '';
-  }catch{ return ''; }
+  }catch{ return addressText; }
 }
-function fetchJsonWithTimeout(url, ms=8000){
+
+function fetchWithTimeout(url, {ms=15000, asText=false}={}){
   const ctrl = new AbortController();
   const timer = setTimeout(()=>ctrl.abort(), ms);
-  return fetch(url, { headers:{'Accept':'application/json'}, cache:'no-store', signal:ctrl.signal })
-    .then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  return fetch(url, { headers:{'Accept': asText?'text/plain':'application/json'}, cache:'no-store', signal:ctrl.signal })
+    .then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return asText ? r.text() : r.json(); })
     .finally(()=>clearTimeout(timer));
 }
-function firstSuccess(promises){
-  return new Promise((resolve, reject)=>{
-    let pending = promises.length, errors = [];
-    promises.forEach((p, i)=>{
-      Promise.resolve(p).then(resolve).catch(e=>{
-        errors[i] = e; if(--pending===0) reject(new AggregateError(errors, 'All failed'));
-      });
-    });
+
+/* Parse Google GViz response to array-of-objects */
+function parseGViz(gvizText){
+  const start = gvizText.indexOf('{');
+  const end   = gvizText.lastIndexOf('}');
+  if (start < 0 || end < 0) throw new Error('GViz parse error');
+  const j = JSON.parse(gvizText.slice(start, end+1));
+  const cols = (j.table.cols||[]).map(c => (c.label || c.id || '').trim());
+  const rows = (j.table.rows||[]).map(r => (r.c||[]).map(c => (c ? c.v : '')));
+  const out = rows.map(arr => {
+    const o = {};
+    cols.forEach((k,i)=>{ o[k] = arr[i]; });
+    return o;
   });
+  return out;
 }
+
+/* Load roster with retries & 3 fallbacks */
+async function loadRoster(){
+  const status = $("dataStatus");
+  status.textContent = "Loading roster…";
+
+  const attempts = [];
+  // try each source up to 2 attempts with small backoff
+  for (const src of ROSTER_SOURCES){
+    for (let i=0;i<2;i++){
+      attempts.push(async ()=>{
+        if (src.kind === 'json'){
+          return await fetchWithTimeout(src.url, {ms:15000, asText:false});
+        } else {
+          const txt = await fetchWithTimeout(src.url, {ms:18000, asText:true});
+          return parseGViz(txt);
+        }
+      });
+    }
+  }
+
+  let lastErr = null;
+  for (let i=0;i<attempts.length;i++){
+    try{
+      const raw = await attempts[i]();
+      ROSTER = raw.map(row => { const o={}; Object.keys(row).forEach(k=>o[String(k).trim().toLowerCase()]=row[k]); return o; });
+      const cities = uniq(ROSTER.map(r => t(r.city)));
+      $("city").innerHTML = `<option value="">Select City</option>` + cities.sort().map(c=>`<option>${c}</option>`).join('');
+      status.textContent = `Loaded ${ROSTER.length} rows`;
+      applyRestoredState(); // if any
+      return;
+    }catch(e){
+      lastErr = e;
+      status.textContent = `Retrying… (${i+1})`;
+      await new Promise(r => setTimeout(r, 600));
+    }
+  }
+  $("city").innerHTML = `<option value="">Failed to load roster</option>`;
+  status.textContent = "Load failed — tap to retry";
+}
+
+/* ===== restore selection if we have it ===== */
+let RESTORED = loadState();
+function applyRestoredState(){
+  if (!(RESTORED && RESTORED.selected)) return;
+
+  attendanceType = RESTORED.attendanceType || 'Login';
+  document.querySelectorAll('#typeSeg button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.type === attendanceType);
+  });
+
+  if (RESTORED.selected.city){
+    $("city").value = RESTORED.selected.city;
+    selected.city = RESTORED.selected.city;
+
+    const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
+    $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option>${m}</option>`).join('');
+
+    if (RESTORED.selected.mall){
+      $("mall").value = RESTORED.selected.mall;
+      selected.mall = RESTORED.selected.mall;
+
+      const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
+      $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option>${r}</option>`).join('');
+
+      if (RESTORED.selected.rep){
+        $("rep").value = RESTORED.selected.rep;
+        selected.rep = RESTORED.selected.rep;
+
+        const row = ROSTER.find(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall) && t(r.salesperson)===t(selected.rep)) || {};
+        selected.storeId = t(row['store id']);
+        selected.refLat  = num(row['ref lat']);
+        selected.refLon  = num(row['ref lon']);
+        if (selected.storeId){ $("storeIdBadge").textContent = "Store ID: " + selected.storeId; $("storeIdBadge").style.display="inline-flex"; }
+        if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
+          $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
+          $("refBadge").style.display="inline-flex";
+        }
+      }
+    }
+  }
+
+  if (Number.isFinite(RESTORED.userLat) && Number.isFinite(RESTORED.userLon)){
+    userLat = RESTORED.userLat; userLon = RESTORED.userLon; lastAccuracy = RESTORED.lastAccuracy||null;
+    clientTsIST = RESTORED.clientTsIST || '';
+    $("locStatus").textContent = `Live: ${userLat.toFixed(5)}, ${userLon.toFixed(5)}${lastAccuracy?` (±${lastAccuracy}m)`:''}`;
+    if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
+      const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
+      $("distance").textContent = `${m} m`; setProximityBadge(m);
+    }
+  }
+  if (RESTORED.addressText){ addressText = RESTORED.addressText; $("addrLine").textContent = `Address: ${addressText}`; }
+
+  updateSubmitEnabled();
+  RESTORED = null;
+}
+
+/* ===== UI helpers ===== */
 function setProximityBadge(m){
   const el = $("proximity"); el.style.display="inline-flex";
   if (m < 100){ el.textContent = "OK (<100m)"; el.className = "badge ok"; }
@@ -250,80 +364,9 @@ function updateSubmitEnabled(){
   $("readyHint").textContent = ready ? "Ready to submit" : "Complete steps to enable";
 }
 
-/* ===== LOAD ROSTER + optional restore ===== */
-let RESTORED = loadState(); // read once on boot
-
-async function loadRoster(){
-  const status = $("dataStatus");
-  status.textContent = "Loading roster…";
-  try{
-    const raw = await firstSuccess(ROSTER_URLS.map(u => fetchJsonWithTimeout(u, 8000)));
-    ROSTER = raw.map(row => { const o={}; Object.keys(row).forEach(k=>o[String(k).trim().toLowerCase()]=row[k]); return o; });
-    const cities = uniq(ROSTER.map(r => t(r.city)));
-    $("city").innerHTML = `<option value="">Select City</option>` + cities.sort().map(c=>`<option>${c}</option>`).join('');
-    status.textContent = `Loaded ${ROSTER.length} rows`;
-
-    // Apply restored selection if any
-    if (RESTORED && RESTORED.selected){
-      attendanceType = RESTORED.attendanceType || 'Login';
-      document.querySelectorAll('#typeSeg button').forEach(b=>{
-        b.classList.toggle('active', b.dataset.type === attendanceType);
-      });
-
-      if (RESTORED.selected.city){
-        $("city").value = RESTORED.selected.city;
-        selected.city = RESTORED.selected.city;
-
-        const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
-        $("mall").innerHTML = `<option value="">Select Mall</option>` + malls.sort().map(m=>`<option>${m}</option>`).join('');
-
-        if (RESTORED.selected.mall){
-          $("mall").value = RESTORED.selected.mall;
-          selected.mall = RESTORED.selected.mall;
-
-          const reps = uniq(ROSTER.filter(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall)).map(r => t(r.salesperson)));
-          $("rep").innerHTML = `<option value="">Select Your Name</option>` + reps.sort().map(r=>`<option>${r}</option>`).join('');
-
-          if (RESTORED.selected.rep){
-            $("rep").value = RESTORED.selected.rep;
-            selected.rep = RESTORED.selected.rep;
-
-            const row = ROSTER.find(r => t(r.city)===t(selected.city) && t(r.mall)===t(selected.mall) && t(r.salesperson)===t(selected.rep)) || {};
-            selected.storeId = t(row['store id']);
-            selected.refLat  = num(row['ref lat']);
-            selected.refLon  = num(row['ref lon']);
-            if (selected.storeId){ $("storeIdBadge").textContent = "Store ID: " + selected.storeId; $("storeIdBadge").style.display="inline-flex"; }
-            if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
-              $("refBadge").textContent = `Ref: ${selected.refLat.toFixed(5)}, ${selected.refLon.toFixed(5)}`;
-              $("refBadge").style.display="inline-flex";
-            }
-          }
-        }
-      }
-
-      if (Number.isFinite(RESTORED.userLat) && Number.isFinite(RESTORED.userLon)){
-        userLat = RESTORED.userLat; userLon = RESTORED.userLon; lastAccuracy = RESTORED.lastAccuracy||null;
-        clientTsIST = RESTORED.clientTsIST || '';
-        $("locStatus").textContent = `Live: ${userLat.toFixed(5)}, ${userLon.toFixed(5)}${lastAccuracy?` (±${lastAccuracy}m)`:''}`;
-        if (Number.isFinite(selected.refLat) && Number.isFinite(selected.refLon)){
-          const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
-          $("distance").textContent = `${m} m`; setProximityBadge(m);
-        }
-      }
-      if (RESTORED.addressText){ addressText = RESTORED.addressText; $("addrLine").textContent = `Address: ${addressText}`; }
-
-      updateSubmitEnabled();
-      RESTORED = null;
-    }
-
-  }catch(e){
-    $("city").innerHTML = `<option value="">Failed to load roster</option>`;
-    status.textContent = "Load failed — tap to retry";
-  }
-}
+/* ===== interactions ===== */
 $("dataStatus").addEventListener("click", loadRoster);
 
-/* ===== Type toggle ===== */
 document.querySelectorAll('#typeSeg button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#typeSeg button').forEach(b=>b.classList.remove('active'));
@@ -333,7 +376,6 @@ document.querySelectorAll('#typeSeg button').forEach(btn=>{
   });
 });
 
-/* ===== Cascading filters ===== */
 $("city").addEventListener("change", ()=>{
   selected.city = $("city").value;
   const malls = uniq(ROSTER.filter(r => t(r.city)===t(selected.city)).map(r => t(r.mall)));
@@ -378,12 +420,12 @@ $("locBtn").addEventListener("click", ()=>{
         const m = haversineMeters(userLat,userLon,selected.refLat,selected.refLon);
         $("distance").textContent = `${m} m`; setProximityBadge(m);
       }
-      addressText = await reverseGeocode(userLat, userLon);
+      addressText = await reverseGeocodeThrottled(userLat, userLon);
       $("addrLine").textContent = addressText ? `Address: ${addressText}` : '';
       saveState(); updateSubmitEnabled();
     },
     err=>{ $("locStatus").textContent = "Location denied or unavailable"; },
-    { enableHighAccuracy:true, maximumAge:5000, timeout:15000 }
+    { enableHighAccuracy:true, maximumAge:7000, timeout:20000 }
   );
 });
 
@@ -411,15 +453,14 @@ $("photo").addEventListener("change", async (e)=>{
       ctx.fillText(line2, 10, h-20);
       photoBase64 = canvas.toDataURL('image/jpeg', 0.85);
       $("preview").src = photoBase64; $("preview").style.display = "block";
-      saveState(); updateSubmitEnabled();
+      updateSubmitEnabled(); // no photo in sessionStorage to save memory
     };
     img.src = reader.result;
   };
   reader.readAsDataURL(f);
 });
 
-/* ===== Result banner ===== */
-/* UPDATED: always shows Mall • Distance • Time (IST) for OK / Check / Not captured */
+/* ===== Result banner (shows mall, distance, time) ===== */
 function showBanner(kind, distance, receiptId){
   const bn = $("resultBanner"), title = $("bannerTitle"), sub = $("bannerSub");
   const mallName = selected.mall || '—';
@@ -474,7 +515,7 @@ $("submitBtn").addEventListener("click", async ()=>{
         showBanner("ok", null, data.receiptId);
       }
       btn.textContent = "Submitted ✓"; // stays disabled
-      clearState(); // done
+      clearState(); // done (we keep photo only in memory)
     } else {
       btn.textContent = "Submit Attendance"; btn.disabled = false;
       showBanner("bad", null, null);
@@ -508,7 +549,7 @@ $("resetBtn").addEventListener("click", ()=>{
 });
 
 /* ===== Boot ===== */
-window.addEventListener('pageshow', ()=>{ /* restore hook if browser kept state */ });
+window.addEventListener('pageshow', ()=>{ /* restore if browser kept state */ });
 loadRoster();
 </script>
 </body>
