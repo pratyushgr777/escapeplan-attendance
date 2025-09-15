@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Retail Dashboard (Demo)</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+<style>
+  :root{
+    --bg1:#070a1a; --bg2:#0b122b; --card:#0f1736;
+    --text:#eaf2ff; --muted:#a9b6cf; --line:#223055;
+    --accent:#22d3ee; --violet:#7c3aed; --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444;
+    --radius:16px; --shadow:0 12px 40px rgba(3,8,20,.35);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; color:var(--text); font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial;
+    background:
+      radial-gradient(900px 600px at -10% -20%, rgba(34,211,238,.18), transparent 50%),
+      radial-gradient(900px 600px at 120% 0%, rgba(124,58,237,.16), transparent 50%),
+      linear-gradient(160deg,var(--bg1),var(--bg2));
+  }
+  .wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+  header{
+    position:sticky; top:0; z-index:10;
+    background:linear-gradient(180deg, rgba(7,10,26,.85), rgba(7,10,26,.65));
+    border-bottom:1px solid var(--line);
+    backdrop-filter: blur(6px);
+  }
+  .bar{max-width:1100px;margin:0 auto; padding:12px 14px; display:flex; align-items:center; gap:12px; justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:900}
+  .logo{width:26px;height:26px;border-radius:50%;
+        background:conic-gradient(from 180deg,var(--accent),var(--violet),#f43f5e,var(--accent))}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .pill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--muted)}
+  input, select{background:#0b1534;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:8px 10px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+  .tab{border:1px solid var(--line);border-radius:999px;padding:8px 12px;cursor:pointer}
+  .tab.active{background:linear-gradient(90deg,#22d3ee,#7c3aed); color:#041024; font-weight:800}
+  .grid{display:grid; gap:12px}
+  @media(min-width:900px){ .grid-2{grid-template-columns:1fr 1fr} .grid-3{grid-template-columns:1fr 1fr 1fr} }
+  .card{background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03));
+        border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden}
+  .h{padding:12px 14px; font-weight:800; border-bottom:1px solid var(--line)}
+  .b{padding:12px 14px}
+  .kpis{display:grid; gap:10px; grid-template-columns:repeat(2,1fr)}
+  @media(min-width:620px){ .kpis{grid-template-columns:repeat(4,1fr)} }
+  .k{background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+     border:1px solid var(--line); padding:12px; border-radius:12px}
+  .k .t{color:var(--muted); font-size:12px}
+  .k .v{font-weight:900; font-size:20px; letter-spacing:.3px}
+  .k .s{font-size:12px; color:var(--muted)}
+  table{width:100%; border-collapse:collapse}
+  th,td{padding:10px; border-bottom:1px solid var(--line); text-align:left; font-size:14px}
+  th{color:var(--muted); font-weight:700}
+  .chip{font-size:12px; border:1px solid var(--line); padding:4px 8px; border-radius:999px}
+  .ok{color:#d1fae5; border-color:rgba(22,163,74,.4)}
+  .warn{color:#ffefcc; border-color:rgba(245,158,11,.45)}
+  .bad{color:#ffd6d6; border-color:rgba(239,68,68,.45)}
+  .muted{color:var(--muted); font-size:12px}
+  .right{display:flex;justify-content:flex-end}
+  .mini{height:28px}
+  .footer{color:var(--muted); text-align:center; padding:20px 0 40px}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><div class="logo"></div> Retail Dashboard (Demo)</div>
+    <div class="filters">
+      <span class="pill" id="rangeLabel">Last 30 days</span>
+      <input type="date" id="from" />
+      <input type="date" id="to" />
+      <select id="mallPick"></select>
+      <select id="repPick"></select>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="mall">Mall detail</button>
+    <button class="tab" data-tab="rep">Rep detail</button>
+    <button class="tab" data-tab="drill">Drilldown</button>
+  </div>
+
+  <!-- Overview -->
+  <section id="overview" class="tabpane">
+    <div class="card">
+      <div class="h">All malls — KPIs</div>
+      <div class="b">
+        <div class="kpis" id="kpisAll"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:12px">
+      <div class="card">
+        <div class="h">Mall leaderboard (MTD)</div>
+        <div class="b">
+          <table id="mallTable">
+            <thead>
+              <tr><th>Mall</th><th>Revenue</th><th>Conv%</th><th>UPT</th><th>ATV</th><th class="right">Trend</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="muted">*Trend shows last 14 days revenue.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="h">Revenue trend (All malls)</div>
+        <div class="b"><canvas id="allTrend" height="170"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mall Detail -->
+  <section id="mall" class="tabpane" style="display:none">
+    <div class="card">
+      <div class="h">Mall KPIs</div>
+      <div class="b">
+        <div class="kpis" id="kpisMall"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:12px">
+      <div class="card">
+        <div class="h">Daily trend</div>
+        <div class="b"><canvas id="mallTrend" height="180"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="h">Funnel (FF → NOB → Units)</div>
+        <div class="b"><canvas id="mallFunnel" height="180"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="h">Rep leaderboard (this mall)</div>
+      <div class="b">
+        <table id="repTableMall">
+          <thead><tr><th>Rep</th><th>Revenue</th><th>Bills</th><th>Units</th><th>UPT</th><th>ATV</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rep Detail -->
+  <section id="rep" class="tabpane" style="display:none">
+    <div class="card">
+      <div class="h">Rep KPIs</div>
+      <div class="b">
+        <div class="kpis" id="kpisRep"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="h">Daily revenue</div>
+      <div class="b"><canvas id="repTrend" height="180"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Drilldown -->
+  <section id="drill" class="tabpane" style="display:none">
+    <div class="card">
+      <div class="h">Sample bills (filtered)</div>
+      <div class="b">
+        <table id="billTable">
+          <thead>
+            <tr><th>Date</th><th>Mall</th><th>Rep</th><th>Bill #</th><th>Amount</th><th>Units</th><th>Mode</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="muted">Showing first 200 rows for speed (demo).</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer">Demo with synthetic data. We’ll wire to your sheets next.</div>
+</div>
+
+<script>
+/* ================================
+   1) DUMMY DATA (last 60 days)
+   ================================ */
+const malls = [
+  "Vega City","Nexus Mysuru","Nexus Mangalore","Westend Pune","Pacific Ghaziabad",
+  "Nexus Amritsar","Nexus NIC","Nexus ITI","1 MG","Orion"
+];
+const reps = [];
+let rid = 1;
+malls.forEach(m => {
+  const n = 1 + Math.floor(Math.random()*3); // 1–3 reps per mall
+  for(let i=0;i<n;i++){
+    reps.push({ id: 'R'+(rid++), name: randomName(), mall: m });
+  }
+});
+
+const dayMs = 24*3600*1000;
+const today = new Date();
+const startDate = new Date(today - 59*dayMs);
+
+function dateKey(d){ return d.toISOString().slice(0,10); }
+function randomName(){
+  const A = ["Aman","Neha","Priya","Rohit","Kiran","Zara","Imran","Sana","Vikram","Meera","Ravi","Isha","Kabir","Naina","Farhan"];
+  return A[Math.floor(Math.random()*A.length)];
+}
+
+/* SalesDaily: one row per mall per day */
+const SalesDaily = [];
+/* SalesBills: small synthetic bills derived from daily */
+const SalesBills = [];
+
+for(let dd=new Date(startDate); dd<=today; dd = new Date(dd.getTime()+dayMs)){
+  malls.forEach((mall, mi) => {
+    const dow = dd.getDay(); // 0 Sun
+    const baseFF = 300 + mi*25;
+    const wkndBoost = (dow===0 || dow===6) ? 1.35 : 1.0;
+    const ff = Math.round((baseFF + randn()*40)*wkndBoost);                      // Footfall
+    const conv = clamp(0.12 + (mi%4)*0.01 + randn()*0.01, 0.06, 0.22);           // Conversion
+    const nob = Math.max(1, Math.round(ff * conv));                              // Bills
+    const upt = clamp(1.2 + (mi%5)*0.1 + randn()*0.05, 0.9, 2.2);                // Units per bill
+    const units = Math.max(1, Math.round(nob * upt));                            // Units
+    const asp = 2200 + (mi%6)*150 + randn()*80;                                  // ₹ per unit
+    const revenue = Math.round(units * asp);                                     // Revenue
+    const openU = 1000 + (10-mi)*25 + randn()*30;
+    const closeU = Math.max(0, Math.round(openU - units + (randn()*10 + 20)));   // crude
+
+    SalesDaily.push({
+      date: dateKey(dd), mall, revenue, bills:nob, units, footfall:ff,
+      opening_stock_units: Math.round(openU), closing_stock_units: Math.round(closeU)
+    });
+
+    // bills (up to 60 per day, keep small for demo)
+    const chosenReps = reps.filter(r => r.mall===mall);
+    const perBill = Math.max(1, Math.round(nob/Math.min(nob, 40)));
+    let billCount = Math.min(nob, 60);
+    for(let b=0;b<billCount;b++){
+      const amount = Math.max(200, Math.round((revenue/nob) * (0.7 + Math.random()*0.6)));
+      const unitsB = Math.max(1, Math.round(upt*(0.6 + Math.random()*0.8)));
+      const mode = ["Cash","Card","UPI"][Math.floor(Math.random()*3)];
+      const rep = chosenReps[Math.floor(Math.random()*chosenReps.length)];
+      SalesBills.push({
+        date: dateKey(dd), mall, rep: rep ? rep.name : "—",
+        bill_no: mall.slice(0,2).toUpperCase()+"-"+dateKey(dd).slice(5).replace('-','')+"-"+(1000+b),
+        amount, units: unitsB, mode
+      });
+    }
+  });
+}
+
+function randn(){ // normal noise
+  let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+
+/* ================================
+   2) HELPERS / METRICS
+   ================================ */
+function parseDate(s){ const d=new Date(s); d.setHours(0,0,0,0); return d; }
+function inRange(d, from, to){ const x=parseDate(d); return x>=from && x<=to; }
+
+function sum(arr, f){ let t=0; for(const x of arr) t += f(x)||0; return t; }
+function kpiFromRows(rows){
+  const revenue = sum(rows, r=>r.revenue);
+  const bills   = sum(rows, r=>r.bills);
+  const units   = sum(rows, r=>r.units);
+  const ff      = sum(rows, r=>r.footfall);
+  const conv    = ff ? (bills/ff) : 0;
+  const asp     = units ? (revenue/units) : 0;
+  const upt     = bills ? (units/bills) : 0;
+  const atv     = bills ? (revenue/bills) : 0;
+  const stockOpen = sum(rows, r=>r.opening_stock_units);
+  const stockClose= sum(rows, r=>r.closing_stock_units);
+  const days = new Set(rows.map(r=>r.date)).size;
+  const mtdUnits = units;
+  const cover = (mtdUnits && days) ? (stockClose / (mtdUnits/days)) : 0;
+  return { revenue, bills, units, ff, conv, asp, upt, atv, cover, stockOpen, stockClose };
+}
+
+function fmtMoney(n){ return "₹" + (n||0).toLocaleString("en-IN"); }
+function fmt(n){ return (n||0).toLocaleString("en-IN"); }
+function pct(x){ return (x*100).toFixed(1)+"%"; }
+
+/* ================================
+   3) UI INIT
+   ================================ */
+const fromEl = document.getElementById('from');
+const toEl   = document.getElementById('to');
+const rangeLabel = document.getElementById('rangeLabel');
+const mallPick = document.getElementById('mallPick');
+const repPick  = document.getElementById('repPick');
+
+(function initFilters(){
+  const to = new Date(); const from = new Date(to - 29*dayMs);
+  fromEl.value = dateKey(from); toEl.value = dateKey(to);
+  rangeLabel.textContent = "Last 30 days";
+
+  mallPick.innerHTML = `<option value="">All malls</option>` + malls.map(m=>`<option>${m}</option>`).join('');
+  const repNames = Array.from(new Set(reps.map(r=>r.name))).sort();
+  repPick.innerHTML = `<option value="">All reps</option>` + repNames.map(r=>`<option>${r}</option>`).join('');
+
+  fromEl.addEventListener('change', refreshAll);
+  toEl.addEventListener('change', refreshAll);
+  mallPick.addEventListener('change', ()=>{ setTab('mall'); refreshAll(); });
+  repPick.addEventListener('change', ()=>{ setTab('rep'); refreshAll(); });
+})();
+
+/* Tabs */
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => { setTab(t.dataset.tab); refreshAll(); });
+});
+function setTab(name){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.tab===name));
+  document.querySelectorAll('.tabpane').forEach(x=>x.style.display = 'none');
+  document.getElementById(name).style.display = '';
+}
+
+/* ================================
+   4) RENDER OVERVIEW
+   ================================ */
+let allTrendChart, mallTrendChart, funnelChart, repTrendChart;
+
+function refreshAll(){
+  const from = parseDate(fromEl.value);
+  const to   = parseDate(toEl.value);
+  rangeLabel.textContent = `${from.toLocaleDateString()} – ${to.toLocaleDateString()}`;
+
+  renderOverview(from, to);
+  renderMall(from, to);
+  renderRep(from, to);
+  renderDrill(from, to);
+}
+
+function renderOverview(from, to){
+  // KPIs
+  const rows = SalesDaily.filter(r => inRange(r.date, from, to));
+  const k = kpiFromRows(rows);
+  document.getElementById('kpisAll').innerHTML = kpiHtml(k);
+
+  // Leaderboard
+  const mAgg = malls.map(m => {
+    const rs = rows.filter(r=>r.mall===m);
+    const kk = kpiFromRows(rs);
+    return { mall:m, ...kk, last14: trend(rowsForMall(m, lastNDates(14))) };
+  }).sort((a,b)=>b.revenue - a.revenue);
+
+  const tb = document.querySelector('#mallTable tbody'); tb.innerHTML = '';
+  mAgg.forEach((r,i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.mall}</td>
+      <td>${fmtMoney(r.revenue)}</td>
+      <td>${pct(r.conv||0)}</td>
+      <td>${(r.upt||0).toFixed(2)}</td>
+      <td>${fmtMoney(Math.round(r.atv||0))}</td>
+      <td class="right"><canvas class="mini" id="spark${i}"></canvas></td>`;
+    tb.appendChild(tr);
+    // tiny spark
+    const ctx = document.getElementById('spark'+i).getContext('2d');
+    new Chart(ctx, {
+      type:'line',
+      data:{ labels: r.last14.labels, datasets:[{data:r.last14.values, fill:false, tension:.35, borderWidth:2}] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}} }
+    });
+  });
+
+  // All trend (revenue)
+  const days = distinctDaysInRange(from,to);
+  const series = days.map(d => sum(SalesDaily.filter(r=>r.date===d), r=>r.revenue));
+  drawOrUpdate('allTrend', 'line', {
+    labels: days, datasets:[{ label:'Revenue', data:series, borderWidth:2, fill:false, tension:.3 }]
+  }, { scales:{ x:{ ticks:{ maxRotation:0, autoSkip:true }}, y:{ beginAtZero:true }}, plugins:{ legend:{display:false}}});
+}
+
+function kpiHtml(k){
+  return `
+    ${kpiCard("Revenue", fmtMoney(k.revenue))}
+    ${kpiCard("Bills", fmt(k.bills), "ATV "+fmtMoney(Math.round(k.atv||0)))}
+    ${kpiCard("Units", fmt(k.units), "UPT "+(k.upt||0).toFixed(2))}
+    ${kpiCard("Footfall", fmt(k.ff), "Conv "+pct(k.conv||0))}
+    ${kpiCard("ASP", fmtMoney(Math.round(k.asp||0)))}
+    ${kpiCard("Stock close (u)", fmt(k.stockClose), "Cover "+(k.cover||0).toFixed(1)+"d")}
+  `;
+}
+function kpiCard(title, val, sub=""){
+  return `<div class="k"><div class="t">${title}</div><div class="v">${val}</div><div class="s">${sub}</div></div>`;
+}
+
+/* ================================
+   5) MALL DETAIL
+   ================================ */
+function renderMall(from,to){
+  const mall = mallPick.value || malls[0];
+  if(!mallPick.value) mallPick.value = mall;
+
+  const rows = SalesDaily.filter(r => r.mall===mall && inRange(r.date, from, to));
+  const k = kpiFromRows(rows);
+  document.getElementById('kpisMall').innerHTML = kpiHtml(k);
+
+  // trend
+  const days = distinctDaysInRange(from,to);
+  const rev  = days.map(d => sum(rows.filter(r=>r.date===d), r=>r.revenue));
+  const nob  = days.map(d => sum(rows.filter(r=>r.date===d), r=>r.bills));
+  drawOrUpdate('mallTrend','line',{
+    labels:days, datasets:[
+      {label:'Revenue', data:rev, borderWidth:2, tension:.35},
+      {label:'Bills',    data:nob, borderWidth:2, tension:.35}
+    ]},{ plugins:{legend:{position:'bottom'}}, scales:{ y:{ beginAtZero:true }}});
+
+  // funnel (average in range)
+  const ff = Math.round(k.ff / Math.max(1,new Set(rows.map(r=>r.date)).size));
+  const nobA = Math.round(k.bills / Math.max(1,new Set(rows.map(r=>r.date)).size));
+  const units = Math.round(k.units / Math.max(1,new Set(rows.map(r=>r.date)).size));
+  drawOrUpdate('mallFunnel','bar',{
+    labels:['Footfall','Bills','Units'],
+    datasets:[{ data:[ff, nobA, units] }]
+  },{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true }}});
+
+  // reps table
+  const tbd = document.querySelector('#repTableMall tbody'); tbd.innerHTML='';
+  const byRep = groupBillsByRep(mall, from, to);
+  byRep.sort((a,b)=>b.revenue-a.revenue).forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${r.rep}</td><td>${fmtMoney(r.revenue)}</td><td>${fmt(r.bills)}</td>
+      <td>${fmt(r.units)}</td><td>${(r.upt||0).toFixed(2)}</td><td>${fmtMoney(Math.round(r.atv||0))}</td>`;
+    tbd.appendChild(tr);
+  });
+}
+
+/* ================================
+   6) REP DETAIL
+   ================================ */
+function renderRep(from,to){
+  const rep = repPick.value || reps[0]?.name;
+  if(!repPick.value && reps[0]) repPick.value = reps[0].name;
+
+  const bills = SalesBills.filter(b => b.rep===rep && inRange(b.date, from, to));
+  const revenue = sum(bills, b=>b.amount);
+  const units   = sum(bills, b=>b.units);
+  const nob     = bills.length;
+  const atv     = nob ? revenue/nob : 0;
+  const upt     = nob ? units/nob : 0;
+
+  document.getElementById('kpisRep').innerHTML = `
+    ${kpiCard("Revenue", fmtMoney(revenue))}
+    ${kpiCard("Bills", fmt(nob), "ATV "+fmtMoney(Math.round(atv)))}
+    ${kpiCard("Units", fmt(units), "UPT "+upt.toFixed(2))}
+    ${kpiCard("Top mall", topMallForRep(rep) || "—")}
+  `;
+
+  const days = distinctDaysInRange(from,to);
+  const daily = days.map(d => sum(bills.filter(b=>b.date===d), b=>b.amount));
+  drawOrUpdate('repTrend','line',{
+    labels:days, datasets:[{label:'Revenue', data:daily, borderWidth:2, tension:.3}]
+  },{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true }}} );
+}
+
+/* ================================
+   7) DRILLDOWN TABLE
+   ================================ */
+function renderDrill(from,to){
+  const mall = mallPick.value;
+  const rep  = repPick.value;
+  let rows = SalesBills.filter(b => inRange(b.date, from, to));
+  if(mall) rows = rows.filter(b=>b.mall===mall);
+  if(rep)  rows = rows.filter(b=>b.rep===rep);
+
+  const tb = document.querySelector('#billTable tbody'); tb.innerHTML='';
+  rows.slice(0,200).forEach(b=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${b.date}</td><td>${b.mall}</td><td>${b.rep}</td><td>${b.bill_no}</td>
+                    <td>${fmtMoney(b.amount)}</td><td>${fmt(b.units)}</td><td>${b.mode}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* ================================
+   8) UTIL FOR CHARTS/GROUPING
+   ================================ */
+function rowsForMall(m, rows){ return rows.filter(r=>r.mall===m); }
+function lastNDates(n){
+  const arr=[]; const to=new Date(); const from=new Date(to - (n-1)*dayMs);
+  for(let d=new Date(from); d<=to; d=new Date(d.getTime()+dayMs)) arr.push(dateKey(d));
+  return arr;
+}
+function distinctDaysInRange(from,to){
+  const arr=[]; for(let d=new Date(from); d<=to; d=new Date(d.getTime()+dayMs)) arr.push(dateKey(d));
+  return arr;
+}
+function trend(rows){
+  const labels = Array.from(new Set(rows.map(r=>r.date))).sort();
+  const values = labels.map(d => sum(rows.filter(r=>r.date===d), r=>r.revenue));
+  return { labels, values };
+}
+function drawOrUpdate(id, type, data, options){
+  const ctx = document.getElementById(id).getContext('2d');
+  const existing = Chart.getChart(id);
+  if(existing){ existing.data = data; existing.options = options; existing.update(); return; }
+  new Chart(ctx, { type, data, options });
+}
+function groupBillsByRep(mall, from, to){
+  const rows = SalesBills.filter(b=>b.mall===mall && inRange(b.date, from, to));
+  const map = new Map();
+  rows.forEach(b=>{
+    const x = map.get(b.rep) || { rep:b.rep, revenue:0, bills:0, units:0 };
+    x.revenue += b.amount; x.bills += 1; x.units += b.units;
+    map.set(b.rep, x);
+  });
+  return Array.from(map.values()).map(x => ({...x, atv: x.bills? x.revenue/x.bills : 0, upt: x.bills? x.units/x.bills : 0}));
+}
+function topMallForRep(rep){
+  const rows = SalesBills.filter(b=>b.rep===rep);
+  if(!rows.length) return null;
+  const byMall = {};
+  rows.forEach(b => byMall[b.mall] = (byMall[b.mall]||0) + b.amount);
+  return Object.entries(byMall).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+/* boot */
+refreshAll();
+</script>
+</body>
+</html>
